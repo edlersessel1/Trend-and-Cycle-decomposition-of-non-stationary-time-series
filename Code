@@ -1,0 +1,855 @@
+#### Necessary packages ####
+library(ggplot2)
+library(forecast)
+library(tseries)
+library(mFilter)
+library(zoo)
+library(urca)
+library(bvarsv)
+library(wavelets)
+library(KFAS)
+library(tidyr)
+library(dplyr)
+library(stargazer)
+library(car)
+
+# clear environment
+rm(list = ls())
+
+# set working direction
+setwd("/Users/..")
+
+# for better usability
+setwd(file.choose())
+
+Data <- read.csv("ghg_concentrations.csv")
+
+# start of using ChatGPT
+# check for variables
+if (!all(c("YYYY", "CO2", "CH4", "N2O") %in% names(Data))) {
+  stop("Required columns are missing in the dataset.")
+}
+# End of using ChatGPT
+head(Data)
+summary(Data)
+
+# Extract each Greenhouse Gas Emission separately
+Data_CO2 <- Data[, c("YYYY", "CO2")]
+Data_CH4 <- Data[, c("YYYY", "CH4")]
+Data_N2O <- Data[, c("YYYY", "N2O")]
+
+# Analyzing Greenhouse Gas emissions
+
+#### Analyzing CO2 Carbon dioxide ####
+
+# Prepare data, excluding the first row, year 1750 
+# because of large difference to second row (100 years)
+
+new_data <- Data_CO2[2:nrow(Data), c("YYYY", "CO2")]
+
+# ensure Data is a Time Series
+CO2_ts <- ts(new_data$CO2, start = min(new_data$YYYY), frequency = 1)
+
+# plot the original data
+ggplot(Data_CO2, aes(x=YYYY, y=CO2))+
+  geom_line(color = "black") +
+  labs(title= "",
+       x= "Year",
+       y= "ppm") +
+  theme_minimal()
+
+# Visualizing ACF and PACF for stationarity check
+par(mar = c(4,4,2,1))
+Acf(CO2_ts, col ="black", ci.col="black")
+Pacf(CO2_ts, col = "black", ci.col="black")
+
+# Perform Dickey-Fuller test to check for stationarity
+df_CO2 <- ur.df(CO2_ts, type ="trend", selectlags = "BIC")
+summary(df_CO2) # Value of test-statistics is: 5.1343
+
+# Conclusion
+# Since the test statistic is greater than critical values, 
+# the series is non-stationary
+# ACF and PACF show typical behavior for non-stationarity
+
+
+# Apply different Filter / Decomposition Methods
+
+# Start using ChatGPT
+
+# Helper function to plot trend component
+plot_trend <- function(trend, title, time_vector) {
+  ggplot() +
+    geom_line(aes(x = time_vector, y = trend), color = "black", size = 0.5) +
+    labs(title = title, x = "Year", y = "Trend Component (ppm)") +
+    theme_minimal()
+}
+
+# Helper function to plot cyclical component
+plot_cycle <- function(cycle, title, time_vector) {
+  ggplot() +
+    geom_line(aes(x = time_vector, y = cycle), color = "black", size = 0.5) +
+    labs(title = title, x = "Year", y = "Cyclical Component (ppm)") +
+    ylim(min(cycle, na.rm = TRUE), max(cycle, na.rm = TRUE)) +
+    theme_minimal()
+}
+# End of using ChatGPT
+
+#### Hodrick-Prescott Filter ####
+
+# lambda 6.25
+hp_result <- hpfilter(new_data$CO2, freq= 6.25)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", new_data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", new_data$YYYY)
+
+# lambda 25
+hp_result <- hpfilter(new_data$CO2, freq= 25)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", new_data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", new_data$YYYY)
+
+# lambda 100
+hp_result <- hpfilter(new_data$CO2, freq= 100)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", new_data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", new_data$YYYY)
+
+# lambda 400
+hp_result <- hpfilter(new_data$CO2, freq= 400)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", new_data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", new_data$YYYY)
+
+# Conclusion different lambda
+# the higher the lambda the smoother the trend component
+# for cycle component lambda equal to 400 showing the most cyclical fluctuations
+
+#### Beveridge-Nelson Decomposition ####
+
+# Start of using ChatGPT
+arima_model <- auto.arima(CO2_ts)  # Fit ARIMA model
+CO2_trend <- fitted(arima_model)  # Trend component (fitted values)
+CO2_cycle <- residuals(arima_model)  # Cycle component (original minus forecast)
+CO2_cycle
+# End of using ChatGPT
+
+# Plot Trend Component (from ARIMA forecast)
+plot_trend(CO2_trend, "Beveridge-Nelson Trend Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (original minus forecast) with y-axis from -1 to 1
+plot_cycle(CO2_cycle, "Beveridge-Nelson Cyclical Component", time_vector = new_data$YYYY)
+
+
+##### Baxter-King Filter Decomposition ####
+
+bk_result <- bkfilter(CO2_ts, pl = 2, pu = 8, nfix = 3)
+
+# Plot Trend Component (from Baxter-King Filter)
+plot_trend(bk_result$trend, "Baxter-King Trend Component", time_vector = new_data$YYYY)
+# Warning message from console ignored
+
+# Plot Cyclical Component (from Baxter-King Filter) with y-axis from -1 to 1
+plot_cycle(bk_result$cycle, "Baxter-King Cyclical Component", time_vector = new_data$YYYY)
+# Warning message from console ignored
+
+#### Christiano-Fitzgerald Filter #####
+
+cf_result <- cffilter(CO2_ts, pl = 2, pu = 8, root = TRUE)
+
+# Plot Trend Component (from Christiano-Fitzgerald Filter)
+plot_trend(cf_result$trend, "Christiano-Fitzgerald Trend Component", time_vector = new_data$YYYY)
+# Warning message from console ignored
+
+# Plot Cyclical Component (from Christiano-Fitzgerald Filter) with y-axis from -1 to 1
+plot_cycle(cf_result$cycle, "Christiano-Fitzgerald Cyclical Component", time_vector = new_data$YYYY)
+
+#### Wavelet Decomposition ####
+
+dwt_result <- dwt(CO2_ts, filter = "haar", n.levels = 4, boundary = "periodic")
+
+# Start of using ChatGPT
+# Extract trend and cycle components from Wavelet Decomposition
+approximation <- dwt_result@V[[4]]  # Trend component at the last level
+detail1 <- dwt_result@W[[1]]  # High-frequency component (level 1)
+detail2 <- dwt_result@W[[2]]  # Mid-frequency component (level 2)
+detail3 <- dwt_result@W[[3]]  # Lower-frequency component (level 3)
+detail4 <- dwt_result@W[[4]]  # Lowest-frequency component (level 4)
+# End of using ChatGPT
+
+dev.new(width = 12, height = 8)
+par(mar = c(4, 4, 2, 1))
+# Plot the original series and the decomposed components
+par(mfrow = c(3, 1))  # Create a 3-panel layout
+plot(CO2_ts, type = "l", col = "black", main = "Original CO2 Time Series", ylab = "ppm", xlab = "")
+plot(approximation, type = "l", col = "black", main = "Wavelet Decomposition: Trend Component", ylab = "ppm", xlab = "")
+plot(detail1, type = "l", col = "black", main = "Wavelet Decomposition: Cycle (Level 1)", ylab = "ppm", xlab = "")
+par(mfrow = c(1, 1))  # Restore single plotting layout
+
+####  Kalman Filter ####
+
+# Start of using ChatGPT
+model_cycle <- SSModel(
+  CO2_ts ~ SSMtrend(degree = 1, Q = list(1e-5)) +
+          SSMcycle(period = 10, Q = 1e-5), H = 1e-5)
+
+# Estimate the Unknown Variances 
+fit_cycle <- fitSSM(model_cycle, inits = rep(0, 2), method = "BFGS")
+
+# Apply the Kalman Filter and Smoother
+out_cycle <- KFS(fit_cycle$model)
+
+# Extract the Components
+smoothed_trend <- as.numeric(out_cycle$alphahat[, "level"])
+smoothed_cycle <- as.numeric(out_cycle$alphahat[, "cycle"])
+
+dev.new(width = 12, height = 8)
+par(mar = c(4, 4, 2, 1))
+ # Plot the results
+par(mfrow = c(3, 1))  # 3-panel layout
+
+# Original CO2 series
+plot(CO2_ts, type = "l", col = "black", lwd = 2, main = "Original CO2 Time Series", ylab = "ppm", xlab = "Year")
+
+# Smoothed Trend
+plot(smoothed_trend, type = "l", col = "black", lwd = 2, main = "Smoothed Trend Component", ylab = "ppm", xlab = "Year")
+
+# Smoothed Cyclical Component
+plot(smoothed_cycle, type = "l", col = "black", lwd = 2, main = "Smoothed Cyclical Component", ylab = "Cycle", xlab = "Year")
+
+# Restore layout
+par(mfrow = c(1, 1))
+# End of using ChatGPT
+
+
+#### Analyzing CH4 Methan ####
+
+# Prepare data, excluding the first row (1750)
+new_data <- Data_CH4[2:nrow(Data), c("YYYY", "CH4")]
+CH4_ts <- ts(new_data$CH4, start = min(new_data$YYYY), frequency = 1)
+
+# plot the original data
+ggplot(Data_CH4, aes(x=YYYY, y=CH4))+
+  geom_line(color = "black") +
+  labs(title= "CH4 Greenhouse Gas Emissions 1850-2023",
+       x= "Year",
+       y= "CH4 Concentration(ppm)") +
+  theme_minimal()
+
+# Visualizing ACF and PACF for stationarity check
+par(mar = c(4,4,2,1))
+Acf(CH4_ts, col ="black", ci.col="black")
+Pacf(CH4_ts, col = "black", ci.col="black")
+
+# Perform Dickey-Fuller test to check for stationarity
+df_CH4 <- ur.df(CH4_ts, type ="trend", selectlags = "BIC")
+summary(df_CH4) # test-statistics is: -1.6384
+
+# Conclusion
+# Since the test statistic is greater than critical values, 
+# the series is non-stationary
+# ACF and PACF shows typical behavior for non-stationarity
+
+# Apply different Filter / Decomposition Methods
+
+# Helper function to plot trend component
+plot_trend <- function(trend, title, time_vector) {
+  ggplot() +
+    geom_line(aes(x = time_vector, y = trend), color = "black", size = 0.5) +
+    labs(title = title, x = "Year", y = "Trend Component (ppm)") +
+    theme_minimal()
+}
+
+# Helper function to plot cyclical component
+plot_cycle <- function(cycle, title, time_vector) {
+  ggplot() +
+    geom_line(aes(x = time_vector, y = cycle), color = "black", size = 0.5) +
+    labs(title = title, x = "Year", y = "Cyclical Component (ppm)") +
+    ylim(min(cycle, na.rm = TRUE), max(cycle, na.rm = TRUE)) +
+    theme_minimal()
+}
+
+
+#### Hodrick-Prescott Filter ####
+hp_result <- hpfilter(new_data$CH4, freq= 6.25)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", new_data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", new_data$YYYY)
+
+
+#### Beveridge-Nelson Decomposition ####
+arima_model <- auto.arima(CH4_ts)  # Fit ARIMA model
+CH4_forecast <- fitted(arima_model)  # Trend component (fitted values)
+CH4_cycle <- CH4_ts - CH4_forecast  # Cycle component (original minus forecast)
+CH4_cycle
+
+# Plot Trend Component (from ARIMA forecast)
+plot_trend(CH4_forecast, "Beveridge-Nelson Trend Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (original minus forecast) with y-axis from -1 to 1
+plot_cycle(CH4_cycle, "Beveridge-Nelson Cyclical Component", time_vector = new_data$YYYY)
+
+#### Baxter-King Filter Decomposition ####
+bk_result <- bkfilter(CH4_ts, pl = 2, pu = 8, nfix = 3)
+
+# Plot Trend Component (from Baxter-King Filter)
+plot_trend(bk_result$trend, "Baxter-King Trend Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (from Baxter-King Filter) with y-axis from -1 to 1
+plot_cycle(bk_result$cycle, "Baxter-King Cyclical Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+#### Christiano-Fitzgerald Filter ####
+cf_result <- cffilter(CH4_ts, pl = 2, pu = 8, root = TRUE)
+
+# Plot Trend Component (from Christiano-Fitzgerald Filter)
+plot_trend(cf_result$trend, "Christiano-Fitzgerald Trend Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (from Christiano-Fitzgerald Filter) with y-axis from -1 to 1
+plot_cycle(cf_result$cycle, "Christiano-Fitzgerald Cyclical Component", time_vector = new_data$YYYY)
+
+
+#### Wavelet Decomposition ####
+dwt_result <- dwt(CH4_ts, filter = "haar", n.levels = 4, boundary = "periodic")
+
+# Extract trend and cycle components from Wavelet Decomposition
+approximation <- dwt_result@V[[4]]  # Trend component at the last level
+detail1 <- dwt_result@W[[1]]  # High-frequency component (level 1)
+detail2 <- dwt_result@W[[2]]  # Mid-frequency component (level 2)
+detail3 <- dwt_result@W[[3]]  # Lower-frequency component (level 3)
+detail4 <- dwt_result@W[[4]]  # Lowest-frequency component (level 4)
+
+
+dev.new(width = 12, height = 8)
+par(mar = c(4, 4, 2, 1))
+# Plot the original series and the decomposed components
+par(mfrow = c(3, 1))  # Create a 3-panel layout
+plot(CH4_ts, type = "l", col = "black", main = "Original CH4 Time Series", ylab = "ppm", xlab = "")
+plot(approximation, type = "l", col = "black", main = "Wavelet Decomposition: Trend Component", ylab = "ppm", xlab = "")
+plot(detail1, type = "l", col = "black", main = "Wavelet Decomposition: Cycle (Level 1)", ylab = "ppm", xlab = "")
+par(mfrow = c(1, 1))  # Restore single plotting layout
+
+#### Kalman Filter ####
+
+model_cycle <- SSModel(
+  CH4_ts ~ SSMtrend(degree = 1, Q = list(1e-5)) +
+    SSMcycle(period = 10, Q = 1e-5), H = 1e-5)
+
+# Estimate the Unknown Variances 
+fit_cycle <- fitSSM(model_cycle, inits = rep(0, 2), method = "BFGS")
+
+# Apply the Kalman Filter and Smoother
+out_cycle <- KFS(fit_cycle$model)
+
+# Extract the Components
+smoothed_trend <- as.numeric(out_cycle$alphahat[, "level"])
+smoothed_cycle <- as.numeric(out_cycle$alphahat[, "cycle"])
+
+dev.new(width = 12, height = 8)
+par(mar = c(4, 4, 2, 1))
+# Plot the results
+par(mfrow = c(3, 1))  # 3-panel layout
+
+# Original CO2 series
+plot(CH4_ts, type = "l", col = "black", lwd = 2, main = "Original CH4 Time Series", ylab = "ppm", xlab = "Year")
+
+# Smoothed Trend
+plot(smoothed_trend, type = "l", col = "black", lwd = 2, main = "Smoothed Trend Component", ylab = "ppm", xlab = "Year")
+
+# Smoothed Cyclical Component
+plot(smoothed_cycle, type = "l", col = "black", lwd = 2, main = "Smoothed Cyclical Component", ylab = "Cycle", xlab = "Year")
+
+# Restore layout
+par(mfrow = c(1, 1))
+
+
+#### Analyzing N2O Distickstoffmonoxid ####
+
+# Prepare data, excluding the first row (1750)
+new_data <- Data_N2O[2:nrow(Data), c("YYYY", "N2O")]
+N2O_ts <- ts(new_data$N2O, start = min(new_data$YYYY), frequency = 1)
+
+# plot the original data
+ggplot(Data_N2O, aes(x=YYYY, y=N2O))+
+  geom_line(color = "black") +
+  labs(title= "N2O Greenhouse Gas Emissions 1850-2023",
+       x= "Year",
+       y= "N2O Concentration(ppm)") +
+  theme_minimal()
+
+# Visualizing ACF and PACF for stationarity check
+par(mar = c(4,4,2,1))
+Acf(N2O_ts, col ="black", ci.col="black")
+Pacf(N2O_ts, col = "black", ci.col="black")
+# Perform Dickey-Fuller test to check for stationarity
+df_N2O <- ur.df(N2O_ts, type ="trend", selectlags = "BIC")
+summary(df_N2O) # Value of test-statistic is 4.7365
+
+# Conclusion
+# Since the test statistic is greater than critical values, 
+# the series is non-stationary
+# ACF and PACF show typical behavior for non-stationarity
+
+# Apply different Filter / Decomposition Methods
+
+# Helper function to plot trend component
+plot_trend <- function(trend, title, time_vector) {
+  ggplot() +
+    geom_line(aes(x = time_vector, y = trend), color = "black", size = 0.5) +
+    labs(title = title, x = "Year", y = "Trend Component (ppm)") +
+    theme_minimal()
+}
+
+# Helper function to plot cyclical component
+plot_cycle <- function(cycle, title, time_vector) {
+  ggplot() +
+    geom_line(aes(x = time_vector, y = cycle), color = "black", size = 0.5) +
+    labs(title = title, x = "Year", y = "Cyclical Component (ppm)") +
+    ylim(min(cycle, na.rm = TRUE), max(cycle, na.rm = TRUE)) +
+    theme_minimal()
+}
+
+
+#### Hodrick-Prescott Filter ####
+hp_result <- hpfilter(new_data$N2O, freq= 6.25)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", new_data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", new_data$YYYY)
+
+
+#### Beveridge-Nelson Decomposition ####
+arima_model <- auto.arima(N2O_ts)  # Fit ARIMA model
+N2O_forecast <- fitted(arima_model)  # Trend component (fitted values)
+N2O_forecast
+N2O_cycle <- N2O_ts - N2O_forecast  # Cycle component (original minus forecast)
+N2O_cycle
+# Plot Trend Component (from ARIMA forecast)
+plot_trend(N2O_forecast, "Beveridge-Nelson Trend Component", time_vector = new_data$YYYY)
+
+# Plot Cyclical Component (original minus forecast) with y-axis from -1 to 1
+plot_cycle(N2O_cycle, "Beveridge-Nelson Cyclical Component", time_vector = new_data$YYYY)
+
+#### Baxter-King Filter Decomposition ####
+bk_result <- bkfilter(N2O_ts, pl = 2, pu = 8, nfix = 3)
+
+# Plot Trend Component (from Baxter-King Filter)
+plot_trend(bk_result$trend, "Baxter-King Trend Component", time_vector = new_data$YYYY)
+
+# Plot Cyclical Component (from Baxter-King Filter) with y-axis from -1 to 1
+plot_cycle(bk_result$cycle, "Baxter-King Cyclical Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+#### Christiano-Fitzgerald Filter Decomposition ###
+cf_result <- cffilter(N2O_ts, pl = 2, pu = 8, root = TRUE)
+
+# Plot Trend Component (from Christiano-Fitzgerald Filter)
+plot_trend(cf_result$trend, "Christiano-Fitzgerald Trend Component", time_vector = new_data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (from Christiano-Fitzgerald Filter) with y-axis from -1 to 1
+plot_cycle(cf_result$cycle, "Christiano-Fitzgerald Cyclical Component", time_vector = new_data$YYYY)
+
+
+#### Wavelet Decomposition ####
+dwt_result <- dwt(N2O_ts, filter = "haar", n.levels = 4, boundary = "periodic")
+
+# Extract trend and cycle components from Wavelet Decomposition
+approximation <- dwt_result@V[[4]]  # Trend component at the last level
+detail1 <- dwt_result@W[[1]]  # High-frequency component (level 1)
+detail2 <- dwt_result@W[[2]]  # Mid-frequency component (level 2)
+detail3 <- dwt_result@W[[3]]  # Lower-frequency component (level 3)
+detail4 <- dwt_result@W[[4]]  # Lowest-frequency component (level 4)
+
+
+dev.new(width = 12, height = 8)
+par(mar = c(4, 4, 2, 1))
+# Plot the original series and the decomposed components
+par(mfrow = c(3, 1))  # Create a 3-panel layout
+plot(N2O_ts, type = "l", col = "black", main = "Original N2O Time Series", ylab = "ppm", xlab = "")
+plot(approximation, type = "l", col = "black", main = "Wavelet Decomposition: Trend Component", ylab = "ppm", xlab = "")
+plot(detail1, type = "l", col = "black", main = "Wavelet Decomposition: Cycle (Level 1)", ylab = "ppm", xlab = "")
+par(mfrow = c(1, 1))  # Restore single plotting layout
+
+#### Kalman Filter ####
+
+model_cycle <- SSModel(
+  N2O_ts ~ SSMtrend(degree = 1, Q = list(1e-5)) +
+    SSMcycle(period = 10, Q = 1e-5), H = 1e-5)
+
+# Estimate the Unknown Variances 
+fit_cycle <- fitSSM(model_cycle, inits = rep(0, 2), method = "BFGS")
+
+# Apply the Kalman Filter and Smoother
+out_cycle <- KFS(fit_cycle$model)
+
+# Extract the Components
+smoothed_trend <- as.numeric(out_cycle$alphahat[, "level"])
+smoothed_cycle <- as.numeric(out_cycle$alphahat[, "cycle"])
+
+dev.new(width = 12, height = 8)
+par(mar = c(4, 4, 2, 1))
+# Plot the results
+par(mfrow = c(3, 1))  # 3-panel layout
+
+# Original CO2 series
+plot(N2O_ts, type = "l", col = "black", lwd = 2, main = "Original CH4 Time Series", ylab = "ppm", xlab = "Year")
+
+# Smoothed Trend
+plot(smoothed_trend, type = "l", col = "black", lwd = 2, main = "Smoothed Trend Component", ylab = "ppm", xlab = "Year")
+
+# Smoothed Cyclical Component
+plot(smoothed_cycle, type = "l", col = "black", lwd = 2, main = "Smoothed Cyclical Component", ylab = "Cycle", xlab = "Year")
+
+# Restore layout
+par(mfrow = c(1, 1))
+
+#### Useful Graphical Representations ####
+
+library(tidyr)
+library(dplyr)
+
+# Combine CO2 and N2O
+# Combine both data frames into one long-format data frame
+
+CO2 <- Data$CO2
+N2O <- Data$N2O
+YYYY <- Data$YYYY
+
+# Create a data frame with all the variables
+data <- data.frame(YYYY = YYYY, CO2 = CO2, N2O = N2O)
+
+# Plot using ggplot
+ggplot(data) +
+  geom_line(aes(x = YYYY, y = CO2), color = "black", size = 1) +   # Solid black line for CO2
+  geom_line(aes(x = YYYY, y = N2O), color = "black", linetype = "dashed", size = 1) +  # Dotted black line for N2O
+  labs(x = "Year", y = "ppm", title = "") +
+  theme_minimal()
+
+# Example data structure
+# Data_CO2 should have columns: YYYY, CO2
+# Data_CH4 should have columns: YYYY, CH4
+# Data_N2O should have columns: YYYY, N2O
+
+# Add a 'Gas' column to each dataset and reshape them to long format
+Data_CO2_long <- Data_CO2 %>%
+  mutate(Gas = "CO2") %>%
+  select(YYYY, Gas, Concentration = CO2)
+
+Data_CH4_long <- Data_CH4 %>%
+  mutate(Gas = "CH4") %>%
+  select(YYYY, Gas, Concentration = CH4)
+
+Data_N2O_long <- Data_N2O %>%
+  mutate(Gas = "N2O") %>%
+  select(YYYY, Gas, Concentration = N2O)
+
+# Combine all datasets into one
+combined_data <- bind_rows(Data_CO2_long, Data_CH4_long, Data_N2O_long)
+
+# Check the structure of the combined data
+head(combined_data)
+
+library(ggplot2)
+
+ggplot(combined_data, aes(x = YYYY, y = Concentration, color = Gas)) +
+  geom_line() +
+  labs(title = "Greenhouse Gas Emissions 1750-2023",
+       x = "Year",
+       y = "Concentration (ppm)") +
+  scale_color_manual(values = c("blue", "green", "red")) +
+  theme_minimal() +
+  theme(legend.title = element_blank())
+
+#### Further Investigation 
+
+#### Focus on CO2 ####
+
+# Analysis of a specific time horizon, e.g. last 70 years
+# Focus on CO2
+
+CO2_Data <- Data_CO2[102:175, ]
+TS_CO2 <- ts(CO2_Data$CO2, start = min(CO2_Data$YYYY), frequency = 1)
+
+#### Hodrick-Prescott Filter ####
+hp_result <- hpfilter(CO2_Data$CO2, freq= 6.25)
+
+# Plot Trend Component
+plot_trend(hp_result$trend, "Hodrick-Prescott Trend Component", CO2_Data$YYYY)
+
+# Plot Cyclical Component
+plot_cycle(hp_result$cycle, "Hodrick-Prescott Cyclical Component", CO2_Data$YYYY)
+
+
+#### Beveridge-Nelson Decomposition ####
+arima_model <- auto.arima(TS_CO2)  # Fit ARIMA model
+CO2_forecast <- fitted(arima_model)  # Trend component (fitted values)
+CO2_cycle <- TS_CO2 - CO2_forecast  # Cycle component (original minus forecast)
+CO2_cycle
+# Plot Trend Component (from ARIMA forecast)
+plot_trend(CO2_forecast, "Beveridge-Nelson Trend Component", time_vector = CO2_Data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (original minus forecast) with y-axis from -1 to 1
+plot_cycle(CO2_cycle, "Beveridge-Nelson Cyclical Component", time_vector = CO2_Data$YYYY)
+
+#### Baxter-King Filter ####
+bk_result <- bkfilter(TS_CO2, pl = 2, pu = 8, nfix = 3)
+
+# Plot Trend Component (from Baxter-King Filter)
+plot_trend(bk_result$trend, "Baxter-King Trend Component", time_vector = CO2_Data$YYYY)
+# Warning message from Console ignored
+
+# Plot Cyclical Component (from Baxter-King Filter) with y-axis from -1 to 1
+plot_cycle(bk_result$cycle, "Baxter-King Cyclical Component", time_vector = CO2_Data$YYYY)
+# Warning message from Console ignored
+
+#### Linear Regression Approach ####
+
+# use ENSO Data
+# which shows El Nino La Nino events
+
+ONI <- read.csv2("ONI.csv")
+colnames(ONI) <- c("Time", "ONI")
+head(ONI$Time)
+
+# Start using ChatGPT
+# If 'Time' is a repeated year (e.g., 1950, 1950, ..., 1950), 
+# we need to assign the correct month to each observation.
+
+# First, create a column of months (1 to 12)
+ONI$Month <- rep(1:12, length.out = nrow(ONI))  # Repeats 1 to 12 for each year
+
+# Then, combine the year and month to create a full date
+ONI$Time <- as.Date(paste(ONI$Time, ONI$Month, "01", sep = "-"), format = "%Y-%m-%d")
+
+# End using ChatGPT
+
+# Check the first few rows to confirm
+head(ONI)
+
+# Remove the 'Month' column if not needed
+ONI <- ONI[, c("Time", "ONI")]
+
+# Check the head again to confirm
+head(ONI)
+
+# Convert ONI$ONI from character to numeric
+ONI$ONI <- as.numeric(ONI$ONI)
+
+# Check the structure to confirm the conversion
+str(ONI)
+
+# Plot the ONI index
+plot(ONI$Time, ONI$ONI, type = "l", xlab = "Time", ylab = "ONI Index", main = "ONI Index Time Series")
+
+# Convert the 'Time' column in ONI to Date format if not already done
+ONI$Time <- as.Date(ONI$Time)
+
+# Extract year from 'Time' and add it as a new column
+ONI$Year <- format(ONI$Time, "%Y")
+
+# Aggregate ONI by year (e.g., calculate the mean ONI index per year)
+ONI_yearly <- aggregate(ONI$ONI, by = list(Year = ONI$Year), FUN = mean)
+
+# Rename the columns
+colnames(ONI_yearly) <- c("Year", "ONI_avg")
+
+# View the first few rows of the aggregated ONI data
+head(ONI_yearly)
+
+# Assuming CO2_Data has a 'YYYY' column for years
+# Merge the CO2 data with the aggregated ONI data on 'Year'
+merged_data <- merge(CO2_Data, ONI_yearly, by.x = "YYYY", by.y = "Year")
+
+# View the merged dataset
+head(merged_data)
+
+## regress cycle component with ONI
+
+# Trim the excess row from ONI_yearly if it has 75 rows, leaving only 74
+ONI_yearly_trimmed <- ONI_yearly[1:74, ]
+
+# Or trim from the cycle data if it's too long
+hp_result_trimmed <- hp_result$cycle[1:74]
+
+# Then merge the trimmed data
+merged_data <- data.frame(
+  Time = ONI_yearly_trimmed$Year,
+  Cycle = hp_result_trimmed,
+  ONI = ONI_yearly_trimmed$ONI
+)
+
+# Perform the linear regression
+model <- lm(Cycle ~ ONI, data = merged_data)
+
+# Summarize the results
+summary(model) # p-value 0.004442
+# R-squared 0.107
+# significance 10% and 5%
+
+# export linear regression
+stargazer(model, type = "text")
+
+# Creating a regression model with lagged ONI
+model_with_lags <- lm(Cycle ~ ONI + lag(ONI, 1), data = merged_data)
+summary(model_with_lags) # p-value 7.609e-05
+# r-squared 0.2374
+# significance for both ONI and lag one ONI for all significance level
+
+
+# export linear regression
+stargazer(model_with_lags, type = "text")
+
+
+
+
+#### Homoscedasticity #### 
+
+# Plot residuals vs fitted values
+plot(fitted(model_with_lags), residuals(model_with_lags))
+abline(h = 0, col = "black")  # Add a horizontal line at 0
+
+#### Breusch-Pagan test ####
+library(lmtest)
+bptest(model_with_lags)# p-value 0.2358
+bp_test <- ncvTest(model_with_lags)
+print(bp_test) # p = 0.1691
+# fail to reject the null hypothesis
+# no significance evidence of heteroscedasticity
+
+#### Q-Q plot ####
+qqnorm(residuals(model_with_lags))
+qqline(residuals(model_with_lags), col = "black")
+
+library(olsrr)
+ols_plot_resid_qq(model_with_lags)
+# residuals might look normally distributed
+
+#### Focus on methane and nitrous dioxide ####
+
+CH4_Data <- Data_CH4[102:175, ]
+N2O_Data <- Data_N2O[102:175, ]
+
+# load ERF from dataset
+ERF <- read.csv("ERF_best_1750-2023.csv")
+
+# shrink data to 74 observations
+ERF <- ERF[201:274,]
+
+library(dplyr)
+
+#### methane ####
+
+#### Baxter-King Filter ####
+TS_CH4 <- ts(CH4_Data$CH4, start = min(CH4_Data$YYYY), frequency = 1)
+bk_result <- bkfilter(TS_CH4, pl = 2, pu = 8, nfix = 3)
+bk_cycle <- bk_result$cycle
+bk_cycle
+# make NA to 0 values
+bk_cycle[is.na(bk_cycle)] <- 0
+
+ERF$Cycle <- bk_cycle
+cor <- cor(ERF)
+print(cor) # correlation with solar and volcanic
+
+model_CH4_BK <- lm(Cycle ~ solar + volcanic, data = ERF)
+summary(model_CH4_BK) # r-squared 0.2532
+stargazer(model_CH4_BK, type = "text")
+
+#### Homoscedasticity #### 
+
+# Plot residuals vs fitted values
+plot(fitted(model_CH4_BK), residuals(model_CH4_BK))
+abline(h = 0, col = "black")  # Add a horizontal line at 0
+
+#### Breusch-Pagan test ####
+library(lmtest)
+bptest(model_CH4_BK)# p-value 0.8386
+bp_test <- ncvTest(model_CH4_BK)
+print(bp_test) # p = 0.72456
+# fail to reject the null hypothesis
+# no significance evidence of heteroscedasticity
+
+#### Q-Q plot ####
+qqnorm(residuals(model_CH4_BK))
+qqline(residuals(model_CH4_BK), col = "black")
+
+library(olsrr)
+ols_plot_resid_qq(model_CH4_BK)
+
+#### nitrous dioxide ####
+
+TS_N2O <- ts(N2O_Data$N2O, start = min(N2O_Data$YYYY), frequency = 1)
+
+#### Hodrick-Prescott Filter ####
+hp_result_N2O <- hpfilter(N2O_Data$N2O, freq= 6.25)
+
+Cycle <- hp_result_N2O$cycle
+ERF$Cycle <- Cycle
+cor <- cor(ERF)
+print(cor) # correlation with solar and volcanic
+
+model_N2O <- lm(Cycle ~ solar + volcanic + lag(volcanic, 1), data = ERF)
+summary(model_N2O) # r squared 0.2073
+
+stargazer(model_N2O, type = "text")
+
+#### Homoscedasticity #### 
+
+# Plot residuals vs fitted values
+plot(fitted(model_N2O, residuals(model_N2O)))
+abline(h = 0, col = "black")  # Add a horizontal line at 0
+
+#### Breusch-Pagan test ####
+library(lmtest)
+bptest(model_N2O)# p-value 0.6572
+bp_test <- ncvTest(model_N2O)
+print(bp_test) # p = 0.21766
+# fail to reject the null hypothesis
+# no significance evidence of heteroscedasticity
+
+#### Q-Q plot ####
+qqnorm(residuals(model_N2O))
+qqline(residuals(model_N2O), col = "black")
+
+library(olsrr)
+ols_plot_resid_qq(model_N2O)
+
+# Baxter King
+TS_N2O <- ts(N2O_Data$N2O, start = min(N2O_Data$YYYY), frequency = 1)
+bk_result_N2O <- bkfilter(TS_N2O, pl = 2, pu = 8, nfix = 3)
+bk_cycle_N2O <- bk_result_N2O$cycle
+bk_cycle_N2O
+# make NA to 0 values
+bk_cycle_N2O[is.na(bk_cycle_N2O)] <- 0
+bk_cycle_N2O
+ERF$Cycle <- bk_cycle_N2O
+cor <- cor(ERF)
+print(cor) # correlation with solar and volcanic
+
+model_N2O_BK <- lm(Cycle ~ volcanic + lag(volcanic, 1) + solar, data = ERF)
+summary(model_N2O_BK) # r squared 0.1929
+
+# end of code
